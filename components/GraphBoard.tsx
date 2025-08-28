@@ -25,7 +25,7 @@ interface Edge {
   directed: boolean;
 }
 
-const NODE_RADIUS = 45;
+const NODE_RADIUS = 40; // nodo más grande
 
 /** Indices por nodo para self-loops (0,1,2...) */
 function useSelfLoopIndexMap(edges: Edge[]) {
@@ -43,20 +43,21 @@ function useSelfLoopIndexMap(edges: Edge[]) {
   }, [edges]);
 }
 
+/** Self-loop bonito y no solapado */
 function getSelfLoopPathAndLabel(
   node: Node,
   loopIndex: number
 ): { d: string; labelX: number; labelY: number } {
   const side = loopIndex % 2 === 0 ? 1 : -1;
   const tier = Math.floor(loopIndex / 2);
-  const dx = 40 + tier * 22;
-  const dy = 35 + tier * 18;
+  const dx = 46 + tier * 24;
+  const dy = 42 + tier * 20;
 
   const sx = node.x + side * NODE_RADIUS;
   const sy = node.y;
   const cx1 = node.x + side * (NODE_RADIUS + dx);
   const cy1 = node.y - dy;
-  const cx2 = node.x + side * (NODE_RADIUS + Math.max(24, dx * 0.6));
+  const cx2 = node.x + side * (NODE_RADIUS + Math.max(28, dx * 0.6));
   const cy2 = node.y - dy;
 
   const d = `M ${sx} ${sy} C ${cx1} ${cy1}, ${cx2} ${cy2}, ${sx} ${sy}`;
@@ -64,6 +65,40 @@ function getSelfLoopPathAndLabel(
   const labelY = node.y - dy - 6;
 
   return { d, labelX, labelY };
+}
+
+/** Recorta línea en el borde de los nodos para que la flecha no entre al círculo */
+function lineEndpoints(
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+  padStart: number,
+  padEnd: number
+) {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const len = Math.hypot(dx, dy) || 1;
+  const ux = dx / len;
+  const uy = dy / len;
+
+  const x1 = from.x + ux * padStart;
+  const y1 = from.y + uy * padStart;
+  const x2 = to.x - ux * padEnd;
+  const y2 = to.y - uy * padEnd;
+
+  return { x1, y1, x2, y2, ux, uy, len };
+}
+
+/** Punto sobre una cuadrática (para posicionar etiqueta) */
+function quadPoint(
+  t: number,
+  p0: { x: number; y: number },
+  c: { x: number; y: number },
+  p1: { x: number; y: number }
+) {
+  const mt = 1 - t;
+  const x = mt * mt * p0.x + 2 * mt * t * c.x + t * t * p1.x;
+  const y = mt * mt * p0.y + 2 * mt * t * c.y + t * t * p1.y;
+  return { x, y };
 }
 
 /** Util: nombre de archivo con timestamp */
@@ -76,12 +111,11 @@ function nowStamp() {
 /** Validación simple del payload importado */
 function parseAndValidateGraph(jsonText: string): { nodes: Node[]; edges: Edge[] } {
   const raw = JSON.parse(jsonText);
-
   if (!raw || typeof raw !== "object") throw new Error("JSON inválido.");
+
   const nodes: Node[] = Array.isArray(raw.nodes) ? raw.nodes : [];
   const edges: Edge[] = Array.isArray(raw.edges) ? raw.edges : [];
 
-  // Validar nodos
   const nodesClean: Node[] = nodes
     .filter((n) => n && typeof n.id === "string")
     .map((n) => ({
@@ -93,10 +127,9 @@ function parseAndValidateGraph(jsonText: string): { nodes: Node[]; edges: Edge[]
 
   const idSet = new Set(nodesClean.map((n) => n.id));
 
-  // Validar aristas
   const edgesClean: Edge[] = edges
     .filter((e) => e && typeof e.id === "string" && typeof e.from === "string" && typeof e.to === "string")
-    .filter((e) => idSet.has(e.from) && idSet.has(e.to)) // referencias válidas
+    .filter((e) => idSet.has(e.from) && idSet.has(e.to))
     .map((e) => ({
       id: String(e.id),
       from: String(e.from),
@@ -144,17 +177,17 @@ export default function GraphBoard() {
   const svgRef = useRef<SVGSVGElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  /** Modo oscuro: colores */
+  /** Dark mode colors */
   const strokeColor = "#e5e7eb"; // gray-200
   const textColor = "#e5e7eb";   // gray-200
-  const nodeFill = "#57c3d1";    // teal-ish
+  const nodeFill = "#57c3d1";
 
   // Cerrar menú contextual con click global / escape
   useEffect(() => {
     const onDocClick = () => setEdgeMenu((m) => ({ ...m, visible: false }));
     const onEsc = (e: KeyboardEvent) => { if (e.key === "Escape") onDocClick(); };
     document.addEventListener("click", onDocClick);
-    document.addEventListener("contextmenu", onDocClick); // cerrar si clic derecho fuera
+    document.addEventListener("contextmenu", onDocClick);
     document.addEventListener("keydown", onEsc);
     return () => {
       document.removeEventListener("click", onDocClick);
@@ -186,7 +219,7 @@ export default function GraphBoard() {
     setDraggingNode(null);
   };
 
-  /** Exportar JSON */
+  /** Exportar / Importar / Limpiar */
   const exportJSON = () => {
     const payload = JSON.stringify({ nodes, edges }, null, 2);
     const blob = new Blob([payload], { type: "application/json;charset=utf-8" });
@@ -199,27 +232,22 @@ export default function GraphBoard() {
     a.remove();
     URL.revokeObjectURL(url);
   };
-
-  /** Importar JSON (archivo) */
   const triggerImport = () => fileRef.current?.click();
-
   const onImportFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    e.target.value = ""; // reset para permitir re-subir el mismo archivo
+    e.target.value = "";
     if (!file) return;
     try {
       const text = await file.text();
       const { nodes: nn, edges: ee } = parseAndValidateGraph(text);
       setNodes(nn);
       setEdges(ee);
-      // Ajustar contador al máximo id numérico + 1 si es posible, o seguir secuencial simple
       const maxNumericId =
         nn
           .map((n) => Number(n.id))
           .filter((x) => Number.isFinite(x))
           .reduce((acc, val) => Math.max(acc, val), 0) || 0;
       setNodeCounter(maxNumericId + 1);
-      // Reset de modos y estados
       setAddMode(false);
       setDeleteNodeMode(false);
       setDeleteEdgeMode(false);
@@ -229,8 +257,6 @@ export default function GraphBoard() {
       alert(`Error al importar JSON: ${err?.message ?? err}`);
     }
   };
-
-  /** Limpiar grafo */
   const clearAll = () => {
     setNodes([]);
     setEdges([]);
@@ -242,7 +268,7 @@ export default function GraphBoard() {
     setDraggingNode(null);
   };
 
-  /** Click en pizarra: si addMode => crear nodo en el punto */
+  /** Click en pizarra: si addMode => crear nodo */
   const handleBoardClick = (e: React.MouseEvent<SVGSVGElement>) => {
     if (!addMode) return;
     const rect = svgRef.current?.getBoundingClientRect();
@@ -272,10 +298,9 @@ export default function GraphBoard() {
   /** Click en nodo (solo click simple => e.detail === 1) */
   const handleNodeClick = (nodeId: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (e.detail !== 1) return; // evita doble clic
+    if (e.detail !== 1) return;
 
     if (deleteNodeMode) {
-      // Eliminar nodo + aristas asociadas
       setNodes((prev) => prev.filter((n) => n.id !== nodeId));
       setEdges((prev) => prev.filter((ed) => ed.from !== nodeId && ed.to !== nodeId));
       if (edgeStart === nodeId) setEdgeStart(null);
@@ -283,7 +308,6 @@ export default function GraphBoard() {
     }
     if (addMode || deleteEdgeMode) return;
 
-    // Conexión clic-clic (incluye self-loop)
     if (!edgeStart) {
       setEdgeStart(nodeId);
     } else {
@@ -300,7 +324,7 @@ export default function GraphBoard() {
   const handleNodeDoubleClick = (node: Node, e: React.MouseEvent) => {
     e.stopPropagation();
     if (addMode || deleteNodeMode || deleteEdgeMode) return;
-    setEdgeStart(null); // cancela conexión pendiente
+    setEdgeStart(null);
     setSelectedNode(node);
     setModalOpen(true);
   };
@@ -357,7 +381,7 @@ export default function GraphBoard() {
     setEdges((prev) => prev.filter((e) => e.id !== edgeId));
   };
 
-  /** Cursors */
+  /** Cursor UI */
   const boardCursor =
     addMode || deleteNodeMode || deleteEdgeMode
       ? addMode
@@ -370,9 +394,12 @@ export default function GraphBoard() {
   /** Índices de self-loops */
   const selfLoopIndexMap = useSelfLoopIndexMap(edges);
 
+  /** ¿Existe arista "espejo" (B→A) para la arista dada? */
+  const hasMirror = (edge: Edge) =>
+    edges.some((e) => e.id !== edge.id && e.from === edge.to && e.to === edge.from);
+
   /** Render de una arista (normal o self-loop) */
   const renderEdgeGroup = (edge: Edge, fromNode: Node, toNode: Node) => {
-    // Hover highlight y borrado por modo
     const handleEdgeClick = (e: React.MouseEvent) => {
       e.stopPropagation();
       if (deleteEdgeMode) removeEdge(edge.id);
@@ -389,7 +416,7 @@ export default function GraphBoard() {
       setEdgeMenu({ visible: true, x: e.clientX, y: e.clientY, edgeId: edge.id });
     };
 
-    // Self-loop
+    // --- Self-loop ---
     if (edge.from === edge.to) {
       const i = selfLoopIndexMap.get(edge.id) ?? 0;
       const { d, labelX, labelY } = getSelfLoopPathAndLabel(fromNode, i);
@@ -422,11 +449,69 @@ export default function GraphBoard() {
       );
     }
 
-    // Arista normal
-    const x1 = fromNode.x;
-    const y1 = fromNode.y;
-    const x2 = toNode.x;
-    const y2 = toNode.y;
+    // --- Arista normal (posible curvatura A↔B) ---
+
+    // 1) Recortar a bordes
+    const { x1, y1, x2, y2, ux, uy, len } = lineEndpoints(
+      { x: fromNode.x, y: fromNode.y },
+      { x: toNode.x, y: toNode.y },
+      /* start */ NODE_RADIUS + 2,
+      /* end   */ edge.directed ? NODE_RADIUS + 12 : NODE_RADIUS + 2
+    );
+
+    // 2) ¿Hay espejo B→A?
+    const mirror = hasMirror(edge);
+
+    // 3) Si hay espejo, curvamos. Lado determinista según IDs (para que no "salte")
+    if (mirror) {
+      const mx = (x1 + x2) / 2;
+      const my = (y1 + y2) / 2;
+
+      // perpendicular a la dirección
+      const px = -uy;
+      const py = ux;
+
+      // offset según distancia, con límites
+      const base = Math.min(60, Math.max(24, (len - 2 * NODE_RADIUS) * 0.25));
+      const side = edge.from < edge.to ? 1 : -1; // 1 y -1 opuestos para A→B y B→A
+      const cx = mx + px * base * side;
+      const cy = my + py * base * side;
+
+      // punto para label (t=0.5)
+      const mid = quadPoint(0.5, { x: x1, y: y1 }, { x: cx, y: cy }, { x: x2, y: y2 });
+
+      const d = `M ${x1} ${y1} Q ${cx} ${cy} ${x2} ${y2}`;
+
+      return (
+        <g
+          key={edge.id}
+          onClick={handleEdgeClick}
+          onDoubleClick={handleEdgeDblClick}
+          onContextMenu={handleEdgeContextMenu}
+          className="group"
+        >
+          <path
+            d={d}
+            fill="none"
+            stroke={strokeColor}
+            strokeWidth={2}
+            markerEnd={edge.directed ? "url(#arrowhead)" : undefined}
+            className="transition-opacity group-hover:opacity-80"
+          />
+          <text
+            x={mid.x}
+            y={mid.y - 6}
+            textAnchor="middle"
+            style={{ fill: textColor }}
+            className="text-[10px] select-none"
+          >
+            {Math.trunc(edge.value)}
+          </text>
+        </g>
+      );
+    }
+
+    // 4) Si NO hay espejo, línea recta recortada
     const midX = (x1 + x2) / 2;
     const midY = (y1 + y2) / 2;
 
@@ -450,7 +535,7 @@ export default function GraphBoard() {
         />
         <text
           x={midX}
-          y={midY - 5}
+          y={midY - 6}
           textAnchor="middle"
           style={{ fill: textColor }}
           className="text-[10px] select-none"
@@ -463,7 +548,7 @@ export default function GraphBoard() {
 
   return (
     <div className="relative w-full h-[calc(100vh-96px)] flex flex-col gap-3 bg-neutral-900 text-neutral-100">
-      {/* Toolbar (oscuro) */}
+      {/* Toolbar */}
       <div className="px-2 py-2 flex flex-wrap items-center gap-2 border-b border-neutral-800 bg-neutral-900">
         <Button color={addMode ? "primary" : "default"} variant={addMode ? "solid" : "flat"} onPress={toggleAddMode}>
           {addMode ? "Agregar nodo: ON (clic en pizarra)" : "Agregar nodo"}
@@ -519,7 +604,7 @@ export default function GraphBoard() {
         onMouseUp={handleMouseUp}
         onClick={handleBoardClick}
       >
-        {/* --- Defs primero: marcador de flecha claro para dark mode --- */}
+        {/* Marker de flecha (debe ir primero para asegurar visibilidad) */}
         <defs>
           <marker
             id="arrowhead"
@@ -542,47 +627,38 @@ export default function GraphBoard() {
           return renderEdgeGroup(edge, fromNode, toNode);
         })}
 
-{/* Nodos */}
-{nodes.map((node) => {
-  const fontSize = Math.max(20, Math.min(20, NODE_RADIUS * 1.6 / node.label.length));
+        {/* Nodos */}
+        {nodes.map((node) => {
+          // Texto adaptativo según longitud
+          const fontSize = Math.max(10, Math.min(18, (NODE_RADIUS * 1.6) / Math.max(1, node.label.length)));
 
-  return (
-    <g
-      key={node.id}
-      onMouseDown={(e) => {
-        e.stopPropagation();
-        handleMouseDown(node.id);
-      }}
-      onClick={(e) => handleNodeClick(node.id, e)}
-      onDoubleClick={(e) => handleNodeDoubleClick(node, e)}
-      style={{
-        cursor: deleteNodeMode || deleteEdgeMode ? "not-allowed" : addMode ? "crosshair" : "grab",
-      }}
-    >
-      <circle
-        cx={node.x}
-        cy={node.y}
-        r={NODE_RADIUS}
-        fill={nodeFill}
-        stroke="#0b5566"
-        strokeWidth={1}
-      />
-      <text
-        x={node.x}
-        y={node.y + 5}
-        textAnchor="middle"
-        style={{ fill: "#0a0fff", fontSize: `${fontSize}px` }}
-        className="font-semibold select-none pointer-events-none"
-      >
-        {node.label}
-      </text>
-    </g>
-  );
-})}
-</svg>
+          return (
+            <g
+              key={node.id}
+              onMouseDown={(e) => {
+                e.stopPropagation();
+                handleMouseDown(node.id);
+              }}
+              onClick={(e) => handleNodeClick(node.id, e)}
+              onDoubleClick={(e) => handleNodeDoubleClick(node, e)}
+              style={{ cursor: deleteNodeMode || deleteEdgeMode ? "not-allowed" : addMode ? "crosshair" : "grab" }}
+            >
+              <circle cx={node.x} cy={node.y} r={NODE_RADIUS} fill={nodeFill} stroke="#0b5566" strokeWidth={1} />
+              <text
+                x={node.x}
+                y={node.y + 5}
+                textAnchor="middle"
+                className="font-semibold select-none pointer-events-none"
+                style={{ fill: "#0a0a0a", fontSize: `${fontSize}px` }}
+              >
+                {node.label}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
 
-
-      {/* --- Context menu para aristas --- */}
+      {/* Context menu para aristas */}
       {edgeMenu.visible && edgeMenu.edgeId && (
         <div
           className="absolute z-50 min-w-40 rounded-md border border-neutral-700 bg-neutral-900 text-neutral-100 shadow-lg"
@@ -615,7 +691,7 @@ export default function GraphBoard() {
         </div>
       )}
 
-      {/* Modal editar nodo (oscuro) */}
+      {/* Modal editar nodo */}
       <Modal isOpen={modalOpen} onClose={() => setModalOpen(false)}>
         <ModalContent className="bg-neutral-900 text-neutral-100">
           <ModalHeader>Editar Nodo</ModalHeader>
