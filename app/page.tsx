@@ -1,56 +1,30 @@
-import { Link } from "@heroui/link";
-import { Snippet } from "@heroui/snippet";
-import { Code } from "@heroui/code";
-import { button as buttonStyles } from "@heroui/theme";
+// app/page.tsx
+import React from "react";
+import GraphBoard from "@/components/GraphBoard";
 
-import { siteConfig } from "@/config/site";
-import { title, subtitle } from "@/components/primitives";
-import { GithubIcon } from "@/components/icons";
+export const metadata = {
+  title: "Graph Room",
+  description: "Pizarra de nodos y conexiones estilo GraphOnline",
+};
 
-export default function Home() {
+export default function Page() {
   return (
-    <section className="flex flex-col items-center justify-center gap-4 py-8 md:py-10">
-      <div className="inline-block max-w-xl text-center justify-center">
-        <span className={title()}>Make&nbsp;</span>
-        <span className={title({ color: "violet" })}>beautiful&nbsp;</span>
-        <br />
-        <span className={title()}>
-          websites regardless of your design experience.
-        </span>
-        <div className={subtitle({ class: "mt-4" })}>
-          Beautiful, fast and modern React UI library.
-        </div>
-      </div>
+    <main className="min-h-screen w-full bg-gray-50">
+      <header className="sticky top-0 z-20 flex items-center justify-between border-b bg-white px-5 py-3">
+        <h1 className="text-xl font-semibold tracking-tight">Graph Room</h1>
+        <p className="text-sm text-gray-500">
+          Doble clic en un nodo para renombrarlo • Clic en un nodo para iniciar/terminar conexión
+        </p>
+      </header>
 
-      <div className="flex gap-3">
-        <Link
-          isExternal
-          className={buttonStyles({
-            color: "primary",
-            radius: "full",
-            variant: "shadow",
-          })}
-          href={siteConfig.links.docs}
-        >
-          Documentation
-        </Link>
-        <Link
-          isExternal
-          className={buttonStyles({ variant: "bordered", radius: "full" })}
-          href={siteConfig.links.github}
-        >
-          <GithubIcon size={20} />
-          GitHub
-        </Link>
-      </div>
+      {/* Tu pizarra SVG */}
+      <section className="px-4 py-4">
+        <GraphBoard />
+      </section>
 
-      <div className="mt-8">
-        <Snippet hideCopyButton hideSymbol variant="bordered">
-          <span>
-            Get started by editing <Code color="primary">app/page.tsx</Code>
-          </span>
-        </Snippet>
-      </div>
-    </section>
+      <footer className="border-t bg-white px-5 py-3 text-center text-xs text-gray-500">
+        Hecho con React + Next.js + HeroUI + SVG
+      </footer>
+    </main>
   );
 }
