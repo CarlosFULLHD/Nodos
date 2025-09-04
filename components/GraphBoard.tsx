@@ -10,6 +10,8 @@ import {
   ModalFooter,
 } from "@heroui/react";
 import EdgeModal, { EdgeDirection } from "@/components/EdgeModal";
+import AdjacencyMatrixModal from "@/components/AdjacencyMatrixModal";
+import HelpModal from "@/components/HelpModal";
 
 interface Node {
   id: string;
@@ -108,6 +110,14 @@ function nowStamp() {
   return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
 }
 
+// ↓ Añádelo cerca de tus helpers (por ejemplo, bajo nowStamp())
+function sanitizeFilename(name: string) {
+  // Quita caracteres no válidos en nombres de archivo
+  const cleaned = name.trim().replace(/[\\/:*?"<>|]+/g, "").replace(/\s+/g, " ");
+  if (!cleaned) return `graphroom-${nowStamp()}.json`;
+  return cleaned.toLowerCase().endsWith(".json") ? cleaned : `${cleaned}.json`;
+}
+
 /** Validación simple del payload importado */
 function parseAndValidateGraph(jsonText: string): { nodes: Node[]; edges: Edge[] } {
   const raw = JSON.parse(jsonText);
@@ -173,6 +183,11 @@ export default function GraphBoard() {
     y: 0,
     edgeId: null,
   });
+const [adjOpen, setAdjOpen] = useState(false);
+// ↓ Añade estos 2 estados
+const [exportOpen, setExportOpen] = useState(false);
+const [exportName, setExportName] = useState("");
+const [helpOpen, setHelpOpen] = useState(false);
 
   const svgRef = useRef<SVGSVGElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -220,18 +235,19 @@ export default function GraphBoard() {
   };
 
   /** Exportar / Importar / Limpiar */
-  const exportJSON = () => {
-    const payload = JSON.stringify({ nodes, edges }, null, 2);
-    const blob = new Blob([payload], { type: "application/json;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.download = `graphroom-${nowStamp()}.json`;
-    a.href = url;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-  };
+const exportJSON = (filename: string) => {
+  const payload = JSON.stringify({ nodes, edges }, null, 2);
+  const blob = new Blob([payload], { type: "application/json;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.download = filename;
+  a.href = url;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+};
+
   const triggerImport = () => fileRef.current?.click();
   const onImportFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -567,10 +583,20 @@ export default function GraphBoard() {
         >
           {deleteEdgeMode ? "Eliminar relación: ON" : "Eliminar relación"}
         </Button>
+        <Button variant="flat" onPress={() => setAdjOpen(true)}>
+          Matriz de adyacencia
+        </Button>
+<Button variant="flat" onPress={() => setHelpOpen(true)}>
+  Ayuda
+</Button>
 
         <div className="mx-3 h-6 w-px bg-neutral-800" />
 
-        <Button variant="flat" onPress={exportJSON}>Exportar JSON</Button>
+        <Button variant="flat" onPress={() => setExportOpen(true)}>
+          Exportar JSON
+        </Button>
+
+
         <Button variant="flat" onPress={triggerImport}>Importar JSON</Button>
         <input
           ref={fileRef}
@@ -690,32 +716,75 @@ export default function GraphBoard() {
           </button>
         </div>
       )}
+<AdjacencyMatrixModal
+  isOpen={adjOpen}
+  onClose={() => setAdjOpen(false)}
+  nodes={nodes}
+  edges={edges}
+/>
+<HelpModal isOpen={helpOpen} onClose={() => setHelpOpen(false)} />
 
-      {/* Modal editar nodo */}
-      <Modal isOpen={modalOpen} onClose={() => setModalOpen(false)}>
-        <ModalContent className="bg-neutral-900 text-neutral-100">
-          <ModalHeader>Editar Nodo</ModalHeader>
-          <ModalBody>
-            <Input
-              label="Nombre"
-              labelPlacement="outside"
-              classNames={{ inputWrapper: "bg-neutral-800", label: "text-neutral-300" }}
-              value={selectedNode?.label || ""}
-              onChange={(e) =>
-                setSelectedNode((prev) => (prev ? { ...prev, label: e.target.value } : prev))
-              }
-            />
-          </ModalBody>
-          <ModalFooter>
-            <Button variant="flat" onPress={() => setModalOpen(false)}>
-              Cancelar
-            </Button>
-            <Button color="primary" onPress={saveNodeName}>
-              Guardar
-            </Button>
-          </ModalFooter>
-        </ModalContent>
-      </Modal>
+{/* Modal: Exportar JSON con nombre */}
+<Modal isOpen={exportOpen} onClose={() => setExportOpen(false)}>
+  <ModalContent className="bg-neutral-900 text-neutral-100">
+    <ModalHeader>Exportar JSON</ModalHeader>
+    <ModalBody>
+      <Input
+        label="Nombre de archivo"
+        labelPlacement="outside"
+        placeholder={`graphroom-${nowStamp()}.json`}
+        classNames={{ inputWrapper: "bg-neutral-800", label: "text-neutral-300" }}
+        value={exportName}
+        onChange={(e) => setExportName(e.target.value)}
+        description={'No uses caracteres especiales como / \\\\ : * ? " < > |'}
+      />
+    </ModalBody>
+    <ModalFooter>
+      <Button variant="flat" onPress={() => setExportOpen(false)}>
+        Cancelar
+      </Button>
+      <Button
+        color="primary"
+        onPress={() => {
+          const fname = sanitizeFilename(exportName || `graphroom-${nowStamp()}.json`);
+          exportJSON(fname);
+          setExportOpen(false);
+          setExportName("");
+        }}
+      >
+        Exportar
+      </Button>
+    </ModalFooter>
+  </ModalContent>
+</Modal>
+
+{/* Modal editar nodo */}
+<Modal isOpen={modalOpen} onClose={() => setModalOpen(false)}>
+  <ModalContent className="bg-neutral-900 text-neutral-100">
+    <ModalHeader>Editar Nodo</ModalHeader>
+    <ModalBody>
+      <Input
+        label="Nombre"
+        labelPlacement="outside"
+        classNames={{ inputWrapper: "bg-neutral-800", label: "text-neutral-300" }}
+        value={selectedNode?.label || ""}
+        onChange={(e) =>
+          setSelectedNode((prev) => (prev ? { ...prev, label: e.target.value } : prev))
+        }
+      />
+    </ModalBody>
+    <ModalFooter>
+      <Button variant="flat" onPress={() => setModalOpen(false)}>
+        Cancelar
+      </Button>
+      <Button color="primary" onPress={saveNodeName}>
+        Guardar
+      </Button>
+    </ModalFooter>
+  </ModalContent>
+</Modal>
+
+
 
       {/* Modal arista (crear/editar) */}
       <EdgeModal
@@ -740,6 +809,7 @@ export default function GraphBoard() {
         onCreate={handleCreateEdge}
         onSave={handleSaveEdge}
       />
+      
     </div>
   );
 }
